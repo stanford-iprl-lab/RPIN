@@ -37,7 +37,7 @@ class PredEvaluator(object):
             losses = dict.fromkeys(self.loss_name, 0.0)
             box_p_step_losses = [0.0 for _ in range(self.ptest_size)]
             masks_step_losses = [0.0 for _ in range(self.ptest_size)]
-
+        
         for batch_idx, (data, _, rois, gt_boxes, gt_masks, valid, g_idx, seq_l) in enumerate(self.val_loader):
             with torch.no_grad():
                 data = data.to(self.device)
@@ -99,12 +99,12 @@ class PredEvaluator(object):
                 for i in range(rois.shape[0]):
                     batch_size = C.SOLVER.BATCH_SIZE if not C.RPIN.VAE else 1
                     plot_image_idx = batch_size * batch_idx + i
-                    if plot_image_idx < self.plot_image:
+                    if plot_image_idx%self.plot_image == 0:
                         tprint(f'plotting: {plot_image_idx}' + ' ' * 20)
                         video_idx, img_idx = self.val_loader.dataset.video_info[plot_image_idx]
                         video_name = self.val_loader.dataset.video_list[video_idx]
 
-                        v = valid[i].numpy().astype(np.bool)
+                        v = valid[i].numpy().astype(bool)
                         pred_boxes_i = outputs['boxes'][i][:, v]
                         gt_boxes_i = labels['boxes'][i][:, v]
 
@@ -117,6 +117,13 @@ class PredEvaluator(object):
                             for fg_id in [1, 2, 3, 5]:
                                 bg_image[bg_image == fg_id] = 0
                             bg_image = phyre.observations_to_float_rgb(bg_image)
+
+                        elif 'Virtual_Tools' in C.DATA_ROOT:
+                            im_data = np.load(video_name)
+                            bg_image = None
+                            video_name_aux = video_name.split('/')
+                            output_name = video_name_aux[-2] + '_' + video_name_aux[-1].replace('.npy', '')
+
                         else:
                             bg_image = None
                             image_list = sorted(glob(f'{video_name}/*{self.val_loader.dataset.image_ext}'))
@@ -150,11 +157,14 @@ class PredEvaluator(object):
         print('\r', end='')
         print_msg = ""
         mean_loss = np.mean(np.array(self.box_p_step_losses[:self.ptest_size]) / self.loss_cnt) * 1e3
-        print_msg += f"{mean_loss:.3f} | "
-        print_msg += f" | ".join(["{:.3f}".format(self.losses[name] * 1e3 / self.loss_cnt) for name in self.loss_name])
+        print_msg += f"mean: {mean_loss:.3f} | "
+        print_msg += f" | ".join([name + ": {:.3f}".format(self.losses[name] * 1e3 / self.loss_cnt) for name in self.loss_name])
         if C.RPIN.SEQ_CLS_LOSS_WEIGHT:
             print_msg += f" | {self.fg_correct / (self.fg_num + 1e-9):.3f} | {self.bg_correct / (self.bg_num + 1e-9):.3f}"
         pprint(print_msg)
+        rd = {k.strip(): float(v.strip()) for k, v in (pair.split(':') for pair in print_msg.split('|'))}
+        rd['p_step_losses'] = list((np.array(self.box_p_step_losses) / self.loss_cnt * 1e3).round(3))
+        return rd
 
     def loss(self, outputs, labels, phase):
         self.loss_cnt += labels['boxes'].shape[0]

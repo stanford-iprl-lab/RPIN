@@ -4,3 +4,4 @@ from rpin.datasets.simb import SimB
 from rpin.datasets.phyre import PHYRE
 from rpin.datasets.phyreo import PHYREO
 from rpin.datasets.vid import VidPHYRECls
+from rpin.datasets.virtual_tools import VirtualTools

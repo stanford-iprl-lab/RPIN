@@ -5,7 +5,9 @@ import torch.nn.functional as F
 from rpin.utils.misc import tprint
 from timeit import default_timer as timer
 from rpin.utils.config import _C as C
-from rpin.utils.bbox import xyxy_to_rois, xyxy_to_posf
+from rpin.utils.bbox import xyxy_to_rois, xywh2xyxy
+from rpin.utils.vis import plot_rollouts
+import shutil
 
 
 class Trainer(object):
@@ -36,6 +38,8 @@ class Trainer(object):
         self._setup_loss()
         # timer setting
         self.best_mean = 1e6
+        # plot image
+        self.plot_image = 10000
 
     def train(self):
         print_msg = "| ".join(["progress  | mean "] + list(map("{:6}".format, self.loss_name)))
@@ -78,10 +82,13 @@ class Trainer(object):
             speed = self.loss_cnt / (timer() - self.time)
             eta = (self.max_iters - self.iterations) / speed / 3600
             print_msg += f" | speed: {speed:.1f} | eta: {eta:.2f} h"
-            print_msg += (" " * (os.get_terminal_size().columns - len(print_msg) - 10))
+            # terminal_width = os.get_terminal_size().columns
+            terminal_width = shutil.get_terminal_size().columns
+            print_msg += (" " * (terminal_width - len(print_msg) - 10))
             tprint(print_msg)
 
             if self.iterations % self.val_interval == 0:
+                print("Evaluating...")
                 self.snapshot()
                 self.val()
                 self._init_loss()
@@ -139,6 +146,61 @@ class Trainer(object):
                         box_p_step_losses[i] += box_p_step_losses_t[i]
                         masks_step_losses[i] += masks_step_losses_t[i]
 
+            if self.plot_image > 0:
+                outputs = {
+                    'boxes': outputs['boxes'].cpu().numpy(),
+                    'masks': outputs['masks'].cpu().numpy() if C.RPIN.MASK_LOSS_WEIGHT else None,
+                }
+                outputs['boxes'][..., 0::2] *= self.input_width
+                outputs['boxes'][..., 1::2] *= self.input_height
+                outputs['boxes'] = xywh2xyxy(
+                    outputs['boxes'].reshape(-1, 4)
+                ).reshape((data.shape[0], -1, C.RPIN.MAX_NUM_OBJS, 4))
+
+                labels = {
+                    'boxes': labels['boxes'].cpu().numpy(),
+                    'masks': labels['masks'].cpu().numpy(),
+                }
+                labels['boxes'][..., 0::2] *= self.input_width
+                labels['boxes'][..., 1::2] *= self.input_height
+                labels['boxes'] = xywh2xyxy(
+                    labels['boxes'].reshape(-1, 4)
+                ).reshape((data.shape[0], -1, C.RPIN.MAX_NUM_OBJS, 4))
+
+                for i in range(rois.shape[0]):
+                    batch_size = C.SOLVER.BATCH_SIZE if not C.RPIN.VAE else 1
+                    plot_image_idx = batch_size * batch_idx + i
+                    if plot_image_idx%self.plot_image == 0:
+                        tprint(f'plotting: {plot_image_idx}' + ' ' * 20)
+                        video_idx, img_idx = self.val_loader.dataset.video_info[plot_image_idx]
+                        video_name = self.val_loader.dataset.video_list[video_idx]
+
+                        v = valid[i].numpy().astype(bool)
+                        pred_boxes_i = outputs['boxes'][i][:, v]
+                        gt_boxes_i = labels['boxes'][i][:, v]
+
+                        im_data = np.load(video_name)
+                        bg_image = None
+                        video_name_aux = video_name.split('/')
+                        output_name = video_name_aux[-2] + '_' + video_name_aux[-1].replace('.npy', '')
+
+                        scale_w = im_data.shape[1] / self.input_width
+                        scale_h = im_data.shape[0] / self.input_height
+                        pred_boxes_i[..., [0, 2]] *= scale_w
+                        pred_boxes_i[..., [1, 3]] *= scale_h
+                        gt_boxes_i[..., [0, 2]] *= scale_w
+                        gt_boxes_i[..., [1, 3]] *= scale_h
+
+                        pred_masks_i = None
+                        if C.RPIN.MASK_LOSS_WEIGHT:
+                            pred_masks_i = outputs['masks'][i][:, v]
+
+                        ouput_dir = os.path.join(self.output_dir, 'figures', str(self.iterations))
+
+                        plot_rollouts(im_data, pred_boxes_i, gt_boxes_i,
+                                      pred_masks_i, labels['masks'][i][:, v],
+                                      output_dir=ouput_dir, output_name=output_name, bg_image=bg_image)
+
         if C.RPIN.VAE:
             self.losses = losses.copy()
             self.box_p_step_losses = box_p_step_losses.copy()
@@ -158,7 +220,9 @@ class Trainer(object):
         print_msg += f" | ".join(["{:.3f}".format(self.losses[name] * 1e3 / self.loss_cnt) for name in self.loss_name])
         if C.RPIN.SEQ_CLS_LOSS_WEIGHT:
             print_msg += f" | {self.fg_correct / (self.fg_num + 1e-9):.3f} | {self.bg_correct / (self.bg_num + 1e-9):.3f}"
-        print_msg += (" " * (os.get_terminal_size().columns - len(print_msg) - 10))
+        # terminal_width = os.get_terminal_size().columns
+        terminal_width = shutil.get_terminal_size().columns
+        print_msg += (" " * (terminal_width - len(print_msg) - 10))
         self.logger.info(print_msg)
 
     def loss(self, outputs, labels, phase):

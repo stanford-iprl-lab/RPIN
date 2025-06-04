@@ -9,6 +9,7 @@ def xyxy_to_rois(boxes, batch, time_step, num_devices):
     # 2. offset the batch_rois for multi-gpu usage
     if boxes.shape[0] != batch:
         assert boxes.shape[0] == (batch // boxes.shape[2])
+    
     batch, num_objs = boxes.shape[0], boxes.shape[2]
     num_im = batch * time_step
     rois = boxes[:, :time_step]
@@ -53,6 +54,8 @@ def xyxy2xywh(boxes):
     h = boxes[:, 3] - boxes[:, 1] + 1.0
     xc = boxes[:, 0] + 0.5 * (w - 1.0)
     yc = boxes[:, 1] + 0.5 * (h - 1.0)
+    if isinstance(boxes, torch.Tensor):
+        return torch.stack([xc, yc, w, h], dim=-1)
     return np.vstack([xc, yc, w, h]).transpose()
 
 
@@ -62,4 +65,6 @@ def xywh2xyxy(boxes):
     w, h = boxes[:, 2], boxes[:, 3]
     x1, x2 = xc - 0.5 * (w - 1.0), xc + 0.5 * (w - 1.0)
     y1, y2 = yc - 0.5 * (h - 1.0), yc + 0.5 * (h - 1.0)
+    if isinstance(boxes, torch.Tensor):
+        return torch.stack([x1, y1, x2, y2], dim=-1)
     return np.vstack([x1, y1, x2, y2]).transpose()

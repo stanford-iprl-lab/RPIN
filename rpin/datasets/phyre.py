@@ -13,7 +13,7 @@ plot = False
 
 
 class PHYRE(Phys):
-    def __init__(self, data_root, split, image_ext='.jpg'):
+    def __init__(self, data_root, split, image_ext='.jpg', id_filter=None):
         super().__init__(data_root, split, image_ext)
 
         protocal = C.PHYRE_PROTOCAL
@@ -21,6 +21,19 @@ class PHYRE(Phys):
         env_list = open(f'{data_root}/splits/{protocal}_{split}_fold_{fold}.txt', 'r').read().split('\n')
         self.video_list = sum([sorted(glob(f'{data_root}/images/{env.replace(":", "/")}/*.npy')) for env in env_list], [])
         self.anno_list = [(v[:-4] + '_boxes.hkl').replace('images', 'labels') for v in self.video_list]
+        
+        if id_filter is not None:
+            substrings = ['/' + str(x).zfill(5) + '/' for x in np.arange(*id_filter)]
+            self.video_list = [s for s in self.video_list if any(substring in s for substring in substrings)]
+            self.anno_list = [s for s in self.anno_list if any(substring in s for substring in substrings)]
+            
+            substrings = ['/' + str(x).zfill(3) + '_' for x in np.arange(40)]
+            substrings.extend(['/' + str(x).zfill(3) + '.' for x in np.arange(40)])
+            self.video_list = [s for s in self.video_list if any(substring in s for substring in substrings)]
+            self.anno_list = [s for s in self.anno_list if any(substring in s for substring in substrings)]
+            
+            if len(self.video_list) == 0 or len(self.anno_list) == 0:
+                raise Exception(f"Incorrect ID Filter. {id_filter}. No data found.")
 
         # just for plot images
         if plot:
@@ -57,7 +70,7 @@ class PHYRE(Phys):
             np.save(video_info_name, self.video_info)
 
     def _parse_image(self, video_name, vid_idx, img_idx):
-        data = np.array([phyre.observations_to_float_rgb(np.load(video_name))], dtype=np.float).transpose((0, 3, 1, 2))
+        data = np.array([phyre.observations_to_float_rgb(np.load(video_name))], dtype=float).transpose((0, 3, 1, 2))
         return data
 
     def _parse_label(self, anno_name, vid_idx, img_idx):

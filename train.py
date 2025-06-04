@@ -17,9 +17,10 @@ def arg_parse():
     parser = argparse.ArgumentParser(description='RPIN Parameters')
     parser.add_argument('--cfg', required=True, help='path to config file', type=str)
     parser.add_argument('--init', type=str, help='(optionally) path to pretrained model', default='')
-    parser.add_argument('--gpus', type=str, help='specification for GPU, use comma to separate GPUS', default='')
+    parser.add_argument('--gpus', type=str, help='specification for GPU, use comma to separate GPUS', default='0')
     parser.add_argument('--output', type=str, help='output name')
     parser.add_argument('--seed', type=int, help='set random seed use this command', default=0)
+    parser.add_argument('--wandb', action='store_false', help='wandb')
     return parser.parse_args()
 
 
@@ -43,7 +44,9 @@ def main():
         torch.backends.cudnn.deterministic = True
         torch.cuda.manual_seed(0)
         num_gpus = torch.cuda.device_count()
+        print(f'using {num_gpus} GPUs')
     else:
+        print('no GPU available')
         assert NotImplementedError
 
     # ---- setup config files
@@ -51,14 +54,29 @@ def main():
     cfg.SOLVER.BATCH_SIZE *= num_gpus
     cfg.SOLVER.BASE_LR *= num_gpus
     cfg.freeze()
-    output_dir = os.path.join(cfg.OUTPUT_DIR, cfg.DATA_ROOT.split('/')[1], args.output)
+    output_dir = os.path.join(cfg.OUTPUT_DIR, args.output)
     os.makedirs(output_dir, exist_ok=True)
     shutil.copy(args.cfg, os.path.join(output_dir, 'config.yaml'))
     shutil.copy(os.path.join('rpin/models/', cfg.RPIN.ARCH + '.py'), os.path.join(output_dir, 'arch.py'))
 
+    # copy dataset splits
+    # train_split = os.path.join(cfg.DATA_ROOT, 'splits', f'{cfg.VT_PROTOCAL}_train_fold_{cfg.VT_FOLD}.txt')
+    # test_split = os.path.join(cfg.DATA_ROOT, 'splits', f'{cfg.VT_PROTOCAL}_test_fold_{cfg.VT_FOLD}.txt')
+
+    # shutil.copy(train_split, os.path.join(output_dir, f'{cfg.VT_PROTOCAL}_train_fold_{cfg.VT_FOLD}.txt'))
+    # shutil.copy(test_split, os.path.join(output_dir, f'{cfg.VT_PROTOCAL}_test_fold_{cfg.VT_FOLD}.txt'))
+
+
+    train_split = os.path.join(cfg.DATA_ROOT, 'splits', f'{cfg.PHYRE_PROTOCAL}_train_fold_{cfg.PHYRE_FOLD}.txt')
+    test_split = os.path.join(cfg.DATA_ROOT, 'splits', f'{cfg.PHYRE_PROTOCAL}_test_fold_{cfg.PHYRE_FOLD}.txt')
+
+    shutil.copy(train_split, os.path.join(output_dir, f'{cfg.PHYRE_PROTOCAL}_train_fold_{cfg.PHYRE_FOLD}.txt'))
+    shutil.copy(test_split, os.path.join(output_dir, f'{cfg.PHYRE_PROTOCAL}_test_fold_{cfg.PHYRE_FOLD}.txt'))
+
+    
     # ---- setup logger
     logger = setup_logger('RPIN', output_dir)
-    print(git_diff_config(args.cfg))
+    # print(git_diff_config(args.cfg))
 
     # ---- setup model
     model = eval(cfg.RPIN.ARCH + '.Net')()
@@ -88,7 +106,7 @@ def main():
     torch.manual_seed(rng_seed)
     train_set = eval(f'{cfg.DATASET_ABS}')(data_root=cfg.DATA_ROOT, split='train', image_ext=cfg.RPIN.IMAGE_EXT)
     val_set = eval(f'{cfg.DATASET_ABS}')(data_root=cfg.DATA_ROOT, split='test', image_ext=cfg.RPIN.IMAGE_EXT)
-    kwargs = {'pin_memory': True, 'num_workers': 16}
+    kwargs = {'pin_memory': True, 'num_workers': 1}
     train_loader = torch.utils.data.DataLoader(
         train_set, batch_size=cfg.SOLVER.BATCH_SIZE, shuffle=True, **kwargs,
     )
@@ -108,13 +126,7 @@ def main():
               'num_gpus': num_gpus,
               'max_iters': cfg.SOLVER.MAX_ITERS}
     trainer = Trainer(**kwargs)
-
-    try:
-        trainer.train()
-    except BaseException:
-        if len(glob(f"{output_dir}/*.tar")) < 1:
-            shutil.rmtree(output_dir)
-        raise
+    trainer.train()
 
 
 if __name__ == '__main__':

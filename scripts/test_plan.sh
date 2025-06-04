@@ -11,5 +11,5 @@ python test.py --gpus "${GPU}" \
 --predictor-arch "${ARCH}" \
 --predictor-init "outputs/phys/${DATASET}/${PRED_NAME}/ckpt_${iter}.path.tar" \
 --eval ${EVAL} \
---start-id "${SID:=0}" \
---end-id "${EID:=25}"
+--start_id "${SID:=0}" \
+--end_id "${EID:=25}"
